@@ -1,0 +1,32 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: external-secrets
+  namespace: openshift-gitops
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: External Secrets Operator and instance for OpenShift
+
+  sourceRepos:
+    - https://github.com/ebeaudoi/ocp-external-secret.git
+    - git@github.com:ebeaudoi/ocp-external-secret.git
+
+  destinations:
+    - namespace: openshift-gitops
+      server: https://kubernetes.default.svc
+    - namespace: openshift-operators
+      server: https://kubernetes.default.svc
+    - namespace: external-secrets
+      server: https://kubernetes.default.svc
+
+  # Operator + Helm instance create several cluster-scoped objects (CRDs, webhooks, RBAC).
+  # Destinations above still limit where namespaced resources may land.
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

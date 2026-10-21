@@ -1,0 +1,314 @@
+---
+##############################################################################
+# deploy.yaml — deploy OpenShift GitOps (and optionally External Secrets)
+#
+# BEFORE YOU RUN
+#   1. Edit parameters in:  ./update-values.sh   (patches overlays only)
+#   2. Run:                 ./update-values.sh
+#   3. Optional: add Argo CD admin users in
+#        gitops/instance/overlays/connected/gitops-admins-group.yaml
+#
+# HOW TO RUN (from repo root)
+#   ansible-playbook deploy.yaml
+#   ansible-playbook deploy.yaml -e deploy_external_secrets=false
+#   ansible-playbook deploy.yaml --tags gitops
+#   ansible-playbook deploy.yaml --tags external-secrets
+#
+# Kubeconfig: $KUBECONFIG  or  ~/ocpkubeconfig
+##############################################################################
+
+- name: Deploy OpenShift GitOps and External Secrets
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    # ------------------------------------------------------------------
+    # Paths
+    # ------------------------------------------------------------------
+    kubeconfig_path: "{{ lookup('env', 'KUBECONFIG') | default(lookup('env', 'HOME') ~ '/ocpkubeconfig', true) }}"
+    gitops_root: "{{ playbook_dir }}/gitops"
+    eso_argocd_root: "{{ playbook_dir }}/external-secrets-operator/argocd"
+
+    # ------------------------------------------------------------------
+    # What to deploy  (override with -e)
+    # ------------------------------------------------------------------
+    deploy_gitops: true
+    deploy_external_secrets: true
+
+    # ------------------------------------------------------------------
+    # Namespaces / resource names (usually leave as-is)
+    # ------------------------------------------------------------------
+    gitops_operator_namespace: openshift-gitops-operator
+    gitops_instance_namespace: openshift-gitops
+    gitops_subscription_name: openshift-gitops-operator
+    gitops_instance_overlay: connected
+    gitops_operator_overlay: connected
+
+  tasks:
+
+    # ==================================================================
+    # Preflight
+    # ==================================================================
+    - name: Preflight | kubeconfig file exists
+      ansible.builtin.stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      tags: [always]
+
+    - name: Preflight | fail if kubeconfig missing
+      ansible.builtin.fail:
+        msg: >-
+          Kubeconfig not found at {{ kubeconfig_path }}.
+          Set KUBECONFIG or create ~/ocpkubeconfig
+          (oc login … && oc config view --raw > ~/ocpkubeconfig).
+      when: not kubeconfig_stat.stat.exists
+      tags: [always]
+
+    - name: Preflight | oc can reach the cluster
+      ansible.builtin.command:
+        cmd: oc whoami --kubeconfig {{ kubeconfig_path }}
+      register: oc_whoami
+      changed_when: false
+      failed_when: oc_whoami.rc != 0
+      tags: [always]
+
+    - name: Preflight | GitOps overlay directories exist
+      ansible.builtin.stat:
+        path: "{{ gitops_root }}/operator/overlays/{{ gitops_operator_overlay }}"
+      register: gitops_overlay_dir
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: Preflight | fail if GitOps overlay path missing
+      ansible.builtin.fail:
+        msg: "Missing {{ gitops_root }}/operator/overlays/{{ gitops_operator_overlay }}"
+      when:
+        - deploy_gitops | bool
+        - not gitops_overlay_dir.stat.exists
+      tags: [gitops]
+
+    - name: Preflight | External Secrets Argo CD path exists
+      ansible.builtin.stat:
+        path: "{{ eso_argocd_root }}"
+      register: eso_argocd_dir
+      when: deploy_external_secrets | bool
+      tags: [external-secrets]
+
+    - name: Preflight | fail if External Secrets Argo CD path missing
+      ansible.builtin.fail:
+        msg: "Missing {{ eso_argocd_root }}"
+      when:
+        - deploy_external_secrets | bool
+        - not eso_argocd_dir.stat.exists
+      tags: [external-secrets]
+
+    - name: Show deploy plan
+      ansible.builtin.debug:
+        msg: |
+          Kubeconfig         : {{ kubeconfig_path }} (user={{ oc_whoami.stdout }})
+          GitOps             : {{ deploy_gitops }}  (overlay={{ gitops_operator_overlay }}/{{ gitops_instance_overlay }})
+          External Secrets   : {{ deploy_external_secrets }}  (via Argo CD AppProject + Application)
+      tags: [always]
+
+    # ==================================================================
+    # GitOps — 1) Operator
+    # ==================================================================
+    - name: GitOps | Render operator manifests
+      ansible.builtin.command:
+        cmd: oc kustomize "{{ gitops_root }}/operator/overlays/{{ gitops_operator_overlay }}"
+      register: gitops_operator_yaml
+      changed_when: false
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: GitOps | Apply operator
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        definition: "{{ gitops_operator_yaml.stdout | from_yaml_all | list }}"
+        state: present
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: GitOps | Wait for InstallPlan
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: InstallPlan
+        namespace: "{{ gitops_operator_namespace }}"
+      register: gitops_ips
+      until: gitops_ips.resources | length > 0
+      retries: 90
+      delay: 10
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: GitOps | Wait until Subscription has a CSV
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ gitops_subscription_name }}"
+        namespace: "{{ gitops_operator_namespace }}"
+      register: gitops_sub
+      until: >
+        gitops_sub.resources | length > 0 and (
+          (gitops_sub.resources[0].status.installedCSV | default('') | length > 0) or
+          (gitops_sub.resources[0].status.currentCSV | default('') | length > 0)
+        )
+      retries: 90
+      delay: 10
+      ignore_errors: true
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: GitOps | Tip if Subscription never resolves a CSV
+      ansible.builtin.fail:
+        msg: >-
+          GitOps Subscription never resolved a CSV.
+          Tip: oc get sub,ip,csv -n {{ gitops_operator_namespace }};
+          oc describe sub {{ gitops_subscription_name }} -n {{ gitops_operator_namespace }}
+      when:
+        - deploy_gitops | bool
+        - gitops_sub is failed
+      tags: [gitops]
+
+    - name: GitOps | Remember CSV name
+      ansible.builtin.set_fact:
+        gitops_csv_name: >-
+          {{ gitops_sub.resources[0].status.installedCSV
+             | default(gitops_sub.resources[0].status.currentCSV, true) }}
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: GitOps | Wait until CSV is Succeeded
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        name: "{{ gitops_csv_name }}"
+        namespace: "{{ gitops_operator_namespace }}"
+      register: gitops_csv
+      until: >
+        gitops_csv.resources | length > 0 and
+        (gitops_csv.resources[0].status.phase | default('')) == 'Succeeded'
+      retries: 90
+      delay: 10
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    # ==================================================================
+    # GitOps — 2) Argo CD instance
+    # ==================================================================
+    - name: GitOps | Wait for ArgoCD CRD
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: argocds.argoproj.io
+      register: argocd_crd
+      until: argocd_crd.resources | length > 0
+      retries: 60
+      delay: 5
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: GitOps | Render instance manifests
+      ansible.builtin.command:
+        cmd: oc kustomize "{{ gitops_root }}/instance/overlays/{{ gitops_instance_overlay }}"
+      register: gitops_instance_yaml
+      changed_when: false
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: GitOps | Apply Argo CD instance
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        definition: "{{ gitops_instance_yaml.stdout | from_yaml_all | list }}"
+        state: present
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: GitOps | Wait until openshift-gitops-server Deployment exists
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: apps/v1
+        kind: Deployment
+        name: openshift-gitops-server
+        namespace: "{{ gitops_instance_namespace }}"
+      register: gitops_server_deploy
+      until: gitops_server_deploy.resources | length > 0
+      retries: 60
+      delay: 10
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: GitOps | Wait for openshift-gitops-server rollout
+      ansible.builtin.command:
+        cmd: >-
+          oc rollout status deployment/openshift-gitops-server
+          -n {{ gitops_instance_namespace }}
+          --kubeconfig {{ kubeconfig_path }}
+          --timeout=600s
+      changed_when: false
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    - name: GitOps | Done
+      ansible.builtin.debug:
+        msg: >-
+          GitOps finished.
+          Check: oc get csv -n {{ gitops_operator_namespace }};
+          oc get argocd,route -n {{ gitops_instance_namespace }}.
+          Remember: gitops-admins Group users:[] until you add users.
+      when: deploy_gitops | bool
+      tags: [gitops]
+
+    # ==================================================================
+    # External Secrets — AppProject + Application (via Argo CD)
+    # ==================================================================
+    - name: External Secrets | Wait for AppProject CRD
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: appprojects.argoproj.io
+      register: appproject_crd
+      until: appproject_crd.resources | length > 0
+      retries: 60
+      delay: 5
+      when: deploy_external_secrets | bool
+      tags: [external-secrets]
+
+    - name: External Secrets | Render Argo CD manifests
+      ansible.builtin.command:
+        cmd: oc kustomize "{{ eso_argocd_root }}"
+      register: eso_argocd_yaml
+      changed_when: false
+      when: deploy_external_secrets | bool
+      tags: [external-secrets]
+
+    - name: External Secrets | Apply AppProject and Application
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        definition: "{{ eso_argocd_yaml.stdout | from_yaml_all | list }}"
+        state: present
+      when: deploy_external_secrets | bool
+      tags: [external-secrets]
+
+    - name: External Secrets | Done
+      ansible.builtin.debug:
+        msg: >-
+          External Secrets Argo CD Application applied.
+          Check: oc get appproject,application -n {{ gitops_instance_namespace }};
+          oc get application external-secrets -n {{ gitops_instance_namespace }} -o yaml.
+          Ensure this repo is pushed to main so Argo CD can sync.
+      when: deploy_external_secrets | bool
+      tags: [external-secrets]
+
+    # ==================================================================
+    # Finish
+    # ==================================================================
+    - name: Deploy finished
+      ansible.builtin.debug:
+        msg: "All done. GitOps={{ deploy_gitops }} ExternalSecrets={{ deploy_external_secrets }}"
+      tags: [always]

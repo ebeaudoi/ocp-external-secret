@@ -6,3 +6,22 @@ namespace: external-secrets
 
 resources:
   - ../../base
+
+patches:
+  - target:
+      kind: Namespace
+      name: external-secrets
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          argocd.argoproj.io/sync-wave: "1"
+  - target:
+      kind: OperatorConfig
+      name: cluster
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          argocd.argoproj.io/sync-wave: "2"
+          argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
