@@ -43,7 +43,7 @@ GITOPS_CATALOG_SOURCE="redhat-operators"        # connected CatalogSource
 ###############################################################################
 # Operator Subscription
 ESO_SUBSCRIPTION_CHANNEL="stable"               # community-operators channel
-ESO_CATALOG_SOURCE="community-operators"        # CatalogSource name
+ESO_CATALOG_SOURCE="redhat-operators"        # CatalogSource name
 
 # OperatorConfig (instance)
 ESO_PROMETHEUS_ENABLED="true"                   # true | false

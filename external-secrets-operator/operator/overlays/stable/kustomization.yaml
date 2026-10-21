@@ -20,4 +20,4 @@ patches:
         value: stable
       - op: replace
         path: /spec/source
-        value: community-operators
+        value: redhat-operators
