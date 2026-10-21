@@ -6,6 +6,6 @@ metadata:
 spec:
   channel: patch-me-in-overlay
   installPlanApproval: Automatic
-  name: external-secrets-operator
+  name: openshift-external-secrets-operator
   source: community-operators
   sourceNamespace: openshift-marketplace
