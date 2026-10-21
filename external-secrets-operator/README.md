@@ -1,0 +1,2 @@
+# External Secrets Operator
+
