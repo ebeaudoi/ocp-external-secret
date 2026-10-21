@@ -16,12 +16,12 @@ spec:
   destinations:
     - namespace: openshift-gitops
       server: https://kubernetes.default.svc
-    - namespace: openshift-operators
+    - namespace: external-secrets-operator
       server: https://kubernetes.default.svc
     - namespace: external-secrets
       server: https://kubernetes.default.svc
 
-  # Operator + Helm instance create several cluster-scoped objects (CRDs, webhooks, RBAC).
+  # Operator + operand create several cluster-scoped objects (CRDs, webhooks, RBAC).
   # Destinations above still limit where namespaced resources may land.
   clusterResourceWhitelist:
     - group: "*"

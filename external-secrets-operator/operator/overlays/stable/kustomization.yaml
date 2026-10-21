@@ -2,7 +2,7 @@
 kind: Kustomization
 apiVersion: kustomize.config.k8s.io/v1beta1
 
-namespace: openshift-operators
+namespace: external-secrets-operator
 
 resources:
   - ../../base
@@ -17,7 +17,7 @@ patches:
     patch: |-
       - op: replace
         path: /spec/channel
-        value: stable
+        value: stable-v1
       - op: replace
         path: /spec/source
         value: redhat-operators

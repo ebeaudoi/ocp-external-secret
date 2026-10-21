@@ -41,17 +41,10 @@ GITOPS_CATALOG_SOURCE="redhat-operators"        # connected CatalogSource
 #   external-secrets-operator/instance/overlays/default/
 #   external-secrets-operator/argocd/
 ###############################################################################
-# Operator Subscription
-ESO_SUBSCRIPTION_CHANNEL="stable"               # community-operators channel
-ESO_CATALOG_SOURCE="redhat-operators"        # CatalogSource name
-
-# OperatorConfig (instance)
-ESO_PROMETHEUS_ENABLED="true"                   # true | false
-ESO_PROMETHEUS_PORT="8080"
-ESO_REQUESTS_CPU="10m"
-ESO_REQUESTS_MEMORY="96Mi"
-ESO_LIMITS_CPU="100m"
-ESO_LIMITS_MEMORY="256Mi"
+# Operator Subscription (Red Hat External Secrets Operator)
+# Package: openshift-external-secrets-operator  |  Channel must be stable-v1 (not stable)
+ESO_SUBSCRIPTION_CHANNEL="stable-v1"
+ESO_CATALOG_SOURCE="redhat-operators"
 
 # Argo CD Application / AppProject source
 ESO_GIT_REPO_HTTPS="https://github.com/ebeaudoi/ocp-external-secret.git"
@@ -111,7 +104,6 @@ update_gitops() {
 
 update_external_secrets() {
   local op="external-secrets-operator/operator/overlays/stable/kustomization.yaml"
-  local inst="external-secrets-operator/instance/overlays/default/kustomization.yaml"
   local argocd="external-secrets-operator/argocd/kustomization.yaml"
 
   echo ""
@@ -119,29 +111,17 @@ update_external_secrets() {
   echo "[External Secrets] Updating overlays..."
   echo "  Channel:          ${ESO_SUBSCRIPTION_CHANNEL}"
   echo "  Catalog:          ${ESO_CATALOG_SOURCE}"
-  echo "  Prometheus:       ${ESO_PROMETHEUS_ENABLED} (port ${ESO_PROMETHEUS_PORT})"
-  echo "  Requests:         cpu=${ESO_REQUESTS_CPU} memory=${ESO_REQUESTS_MEMORY}"
-  echo "  Limits:           cpu=${ESO_LIMITS_CPU} memory=${ESO_LIMITS_MEMORY}"
   echo "  Git HTTPS:        ${ESO_GIT_REPO_HTTPS}"
   echo "  Git SSH:          ${ESO_GIT_REPO_SSH}"
   echo "  Target revision:  ${ESO_GIT_TARGET_REVISION}"
   echo "------------------------------------------"
 
   cp "${op}"{,."${BACKUP_SUFFIX}"}
-  cp "${inst}"{,."${BACKUP_SUFFIX}"}
   cp "${argocd}"{,."${BACKUP_SUFFIX}"}
 
   # Operator Subscription
   replace_json6902_value "${op}" "/spec/channel" "${ESO_SUBSCRIPTION_CHANNEL}"
   replace_json6902_value "${op}" "/spec/source" "${ESO_CATALOG_SOURCE}"
-
-  # OperatorConfig instance
-  replace_json6902_value "${inst}" "/spec/prometheus/enabled" "${ESO_PROMETHEUS_ENABLED}"
-  replace_json6902_value "${inst}" "/spec/prometheus/service/port" "${ESO_PROMETHEUS_PORT}"
-  replace_json6902_value "${inst}" "/spec/resources/requests/cpu" "${ESO_REQUESTS_CPU}"
-  replace_json6902_value "${inst}" "/spec/resources/requests/memory" "${ESO_REQUESTS_MEMORY}"
-  replace_json6902_value "${inst}" "/spec/resources/limits/cpu" "${ESO_LIMITS_CPU}"
-  replace_json6902_value "${inst}" "/spec/resources/limits/memory" "${ESO_LIMITS_MEMORY}"
 
   # Argo CD Application + AppProject
   replace_json6902_value "${argocd}" "/spec/source/repoURL" "${ESO_GIT_REPO_HTTPS}"

@@ -1,11 +1,11 @@
 # External Secrets Operator
 
-GitOps-ready install of the community **External Secrets Operator** on OpenShift, plus a default `OperatorConfig` instance.
+GitOps-ready install of the **External Secrets Operator for Red Hat OpenShift**, plus a default `ExternalSecretsConfig` instance.
 
 This deploys:
 
-1. The OLM **Subscription** (operator) into `openshift-operators`
-2. The **OperatorConfig** instance into the `external-secrets` namespace
+1. Namespace + OperatorGroup + OLM **Subscription** into `external-secrets-operator`
+2. Operand namespace `external-secrets` + **ExternalSecretsConfig** (`cluster`)
 
 After this is running, you can create `SecretStore` / `ClusterSecretStore` and `ExternalSecret` resources for your apps.
 
@@ -15,10 +15,10 @@ After this is running, you can create `SecretStore` / `ClusterSecretStore` and `
 
 ```
 external-secrets-operator/
-├── operator/                 # OLM Subscription
+├── operator/                 # Namespace, OperatorGroup, Subscription
 │   ├── base/
-│   └── overlays/stable/      # channel: stable
-├── instance/                 # Namespace + OperatorConfig
+│   └── overlays/stable/      # channel: stable-v1, catalog: redhat-operators
+├── instance/                 # Operand namespace + ExternalSecretsConfig
 │   ├── base/
 │   └── overlays/default/
 ├── overlays/full/            # Operator + instance together
@@ -30,7 +30,7 @@ external-secrets-operator/
 
 ## Prerequisites
 
-- OpenShift cluster with **OLM** and the **community-operators** catalog
+- OpenShift cluster with **OLM** and the **redhat-operators** catalog
 - Cluster-admin (or equivalent) access
 - For GitOps: **OpenShift GitOps** (Argo CD) installed — namespace `openshift-gitops`
 
@@ -40,15 +40,16 @@ external-secrets-operator/
 
 | Piece | Kind | Namespace | Purpose |
 | --- | --- | --- | --- |
-| Operator | `Subscription` | `openshift-operators` | Installs ESO from `community-operators` (`stable` channel) |
-| Namespace | `Namespace` | `external-secrets` | Home for the ESO instance |
-| Instance | `OperatorConfig` (`cluster`) | `external-secrets` | Deploys the external-secrets controllers |
+| Operator NS | `Namespace` + `OperatorGroup` | `external-secrets-operator` | Home for the Red Hat operator |
+| Operator | `Subscription` | `external-secrets-operator` | Package `openshift-external-secrets-operator`, channel `stable-v1` |
+| Operand NS | `Namespace` | `external-secrets` | Controllers / webhooks |
+| Instance | `ExternalSecretsConfig` (`cluster`) | `external-secrets-operator` | Deploys the external-secrets operand |
 
 Sync order (Argo CD waves):
 
-1. Wave `0` — Subscription  
-2. Wave `1` — Namespace  
-3. Wave `2` — OperatorConfig (waits for the CRD from the operator)
+1. Wave `0` — Operator Namespace / OperatorGroup / Subscription  
+2. Wave `1` — Operand Namespace  
+3. Wave `2` — ExternalSecretsConfig (waits for the CRD from the operator)
 
 ---
 
@@ -56,10 +57,9 @@ Sync order (Argo CD waves):
 
 ### 0. Install OpenShift GitOps (if needed)
 
-From the repo root, the Ansible playbook installs GitOps and then applies the ESO AppProject + Application:
+From the repo root:
 
 ```bash
-cd ..   # repo root
 ./update-values.sh
 ansible-playbook deploy.yaml
 ```
@@ -83,7 +83,6 @@ Repo used by the Application:
 If GitOps is already installed and you only need the ESO Application:
 
 ```bash
-# from repo root via playbook
 ansible-playbook deploy.yaml -e deploy_gitops=false --tags external-secrets
 
 # or manually
@@ -92,20 +91,15 @@ oc apply -k external-secrets-operator/argocd
 
 That creates:
 
-- **AppProject** `external-secrets` — only this solution can deploy to the needed namespaces
+- **AppProject** `external-secrets`
 - **Application** `external-secrets` — syncs `overlays/full` with auto-sync, prune, and self-heal
 
 ### 3. Watch the sync
 
 ```bash
-# Argo CD application
 oc get application external-secrets -n openshift-gitops
-
-# Operator CSV
-oc get csv -n openshift-operators | grep external-secrets
-
-# Instance
-oc get operatorconfig -n external-secrets
+oc get csv -n external-secrets-operator
+oc get externalsecretsconfig -n external-secrets-operator
 oc get pods -n external-secrets
 ```
 
@@ -115,19 +109,13 @@ Wait until the Application is `Synced` / `Healthy`, the CSV is `Succeeded`, and 
 
 ## Deploy without Argo CD (manual)
 
-Useful for a quick test on a cluster:
-
 ```bash
-# Operator only
 oc apply -k external-secrets-operator/operator/overlays/stable
+oc get csv -n external-secrets-operator
 
-# Wait until the operator CSV is Succeeded
-oc get csv -n openshift-operators | grep external-secrets
-
-# Then the instance
 oc apply -k external-secrets-operator/instance/overlays/default
 
-# Or both at once (OperatorConfig may fail once until the CRD exists — re-apply)
+# Or both at once (ExternalSecretsConfig may fail once until the CRD exists — re-apply)
 oc apply -k external-secrets-operator/overlays/full
 ```
 
@@ -136,13 +124,11 @@ oc apply -k external-secrets-operator/overlays/full
 ## Verify
 
 ```bash
-oc get subscription external-secrets-operator -n openshift-operators
-oc get operatorconfig cluster -n external-secrets
+oc get subscription,csv -n external-secrets-operator
+oc get externalsecretsconfig cluster -n external-secrets-operator
 oc get pods -n external-secrets
 oc get crd | grep external-secrets
 ```
-
-You should see CRDs such as `externalsecrets.external-secrets.io` and `secretstores.external-secrets.io`.
 
 ---
 
@@ -161,22 +147,24 @@ Edit variables in [`../update-values.sh`](../update-values.sh), set `UPDATE_EXTE
 
 | Variable | What it patches |
 | --- | --- |
-| `ESO_SUBSCRIPTION_CHANNEL` | Operator Subscription channel |
-| `ESO_CATALOG_SOURCE` | Operator CatalogSource |
-| `ESO_PROMETHEUS_ENABLED` / `ESO_PROMETHEUS_PORT` | OperatorConfig Prometheus |
-| `ESO_REQUESTS_*` / `ESO_LIMITS_*` | OperatorConfig CPU / memory |
+| `ESO_SUBSCRIPTION_CHANNEL` | Must be `stable-v1` for the Red Hat operator |
+| `ESO_CATALOG_SOURCE` | Usually `redhat-operators` |
 | `ESO_GIT_REPO_HTTPS` / `ESO_GIT_REPO_SSH` | Argo CD Application + AppProject repos |
 | `ESO_GIT_TARGET_REVISION` | Argo CD Application branch / tag |
 
 | Change (manual) | Where |
 | --- | --- |
-| Operator package name | `operator/base/subscription.yaml` |
-| Instance defaults | `instance/base/default-operatorconfig.yaml` |
+| Operand / network policy | `instance/base/externalsecretsconfig.yaml` |
 
 ---
 
 ## Notes
 
-- Uses the **community** operator (`community-operators`), not the Red Hat certified `openshift-external-secrets-operator`.
-- `openshift-operators` already has a global OperatorGroup — no extra OperatorGroup is required.
-- The first sync of `OperatorConfig` needs the CRD from the operator. The Argo CD Application retries and uses `SkipDryRunOnMissingResource`.
+- Uses the **Red Hat** operator (`openshift-external-secrets-operator` from `redhat-operators`).
+- Channel is **`stable-v1`** — there is no `stable` channel for this package (that causes the OLM “constraints not satisfiable” error).
+- If a broken Subscription was already created in `openshift-operators`, delete it before re-syncing:
+
+```bash
+oc delete subscription external-secrets-operator -n openshift-operators --ignore-not-found
+oc delete csv -n openshift-operators -l operators.coreos.com/openshift-external-secrets-operator.openshift-operators --ignore-not-found
+```
