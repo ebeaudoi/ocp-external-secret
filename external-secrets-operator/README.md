@@ -157,12 +157,21 @@ Those app-level resources are **not** part of this repo yet — add them per env
 
 ## Customize
 
-| Change | Where |
+Edit variables in [`../update-values.sh`](../update-values.sh), set `UPDATE_EXTERNAL_SECRETS=true`, then run `./update-values.sh`.
+
+| Variable | What it patches |
 | --- | --- |
-| Operator channel | `operator/overlays/stable/kustomization.yaml` |
-| Operator package / catalog | `operator/base/subscription.yaml` |
-| Instance resources / Prometheus | `instance/base/default-operatorconfig.yaml` |
-| Git repo URL or branch | `argocd/application.yaml` and `argocd/appproject.yaml` |
+| `ESO_SUBSCRIPTION_CHANNEL` | Operator Subscription channel |
+| `ESO_CATALOG_SOURCE` | Operator CatalogSource |
+| `ESO_PROMETHEUS_ENABLED` / `ESO_PROMETHEUS_PORT` | OperatorConfig Prometheus |
+| `ESO_REQUESTS_*` / `ESO_LIMITS_*` | OperatorConfig CPU / memory |
+| `ESO_GIT_REPO_HTTPS` / `ESO_GIT_REPO_SSH` | Argo CD Application + AppProject repos |
+| `ESO_GIT_TARGET_REVISION` | Argo CD Application branch / tag |
+
+| Change (manual) | Where |
+| --- | --- |
+| Operator package name | `operator/base/subscription.yaml` |
+| Instance defaults | `instance/base/default-operatorconfig.yaml` |
 
 ---
 

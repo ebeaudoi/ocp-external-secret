@@ -25,3 +25,21 @@ patches:
         value:
           argocd.argoproj.io/sync-wave: "2"
           argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+      - op: replace
+        path: /spec/prometheus/enabled
+        value: true
+      - op: replace
+        path: /spec/prometheus/service/port
+        value: 8080
+      - op: replace
+        path: /spec/resources/requests/cpu
+        value: 10m
+      - op: replace
+        path: /spec/resources/requests/memory
+        value: 96Mi
+      - op: replace
+        path: /spec/resources/limits/cpu
+        value: 100m
+      - op: replace
+        path: /spec/resources/limits/memory
+        value: 256Mi

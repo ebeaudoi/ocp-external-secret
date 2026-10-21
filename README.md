@@ -5,8 +5,8 @@ Deploy **OpenShift GitOps**, then use Argo CD to install the **External Secrets 
 ## Quick start
 
 ```bash
-# 1. Configure GitOps channel / catalog (optional)
-vim update-values.sh
+# 1. Configure GitOps + External Secrets overlay params (optional)
+vim update-values.sh   # UPDATE_GITOPS / UPDATE_EXTERNAL_SECRETS + ESO_* vars
 ./update-values.sh
 
 # 2. Optional: add Argo CD admin users

@@ -7,3 +7,25 @@ namespace: openshift-gitops
 resources:
   - appproject.yaml
   - application.yaml
+
+patches:
+  - target:
+      kind: Application
+      name: external-secrets
+    patch: |-
+      - op: replace
+        path: /spec/source/repoURL
+        value: https://github.com/ebeaudoi/ocp-external-secret.git
+      - op: replace
+        path: /spec/source/targetRevision
+        value: main
+  - target:
+      kind: AppProject
+      name: external-secrets
+    patch: |-
+      - op: replace
+        path: /spec/sourceRepos/0
+        value: https://github.com/ebeaudoi/ocp-external-secret.git
+      - op: replace
+        path: /spec/sourceRepos/1
+        value: git@github.com:ebeaudoi/ocp-external-secret.git

@@ -11,10 +11,13 @@ commonAnnotations:
   argocd.argoproj.io/sync-wave: "0"
 
 patches:
-  - patch: |-
-      - op: replace
-        path: /spec/channel
-        value: 'stable'
-    target:
+  - target:
       kind: Subscription
       name: external-secrets-operator
+    patch: |-
+      - op: replace
+        path: /spec/channel
+        value: stable
+      - op: replace
+        path: /spec/source
+        value: community-operators
