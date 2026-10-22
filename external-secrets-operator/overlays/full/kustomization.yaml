@@ -5,3 +5,4 @@ kind: Kustomization
 resources:
   - ../../operator/overlays/stable
   - ../../instance/overlays/default
+  - ../../doppler

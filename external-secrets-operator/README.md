@@ -21,7 +21,8 @@ external-secrets-operator/
 ├── instance/                 # Operand namespace + ExternalSecretsConfig
 │   ├── base/
 │   └── overlays/default/
-├── overlays/full/            # Operator + instance together
+├── doppler/                  # Doppler auth Secret + ClusterSecretStore
+├── overlays/full/            # Operator + instance + Doppler
 ├── argocd/                   # AppProject + Application
 └── README.md
 ```
@@ -44,12 +45,16 @@ external-secrets-operator/
 | Operator | `Subscription` | `external-secrets-operator` | Package `openshift-external-secrets-operator`, channel `stable-v1` |
 | Operand NS | `Namespace` | `external-secrets` | Controllers / webhooks |
 | Instance | `ExternalSecretsConfig` (`cluster`) | `external-secrets-operator` | Deploys the external-secrets operand |
+| Doppler auth | `Secret` | `external-secrets` | Service token for the Doppler provider |
+| Store | `ClusterSecretStore` (`doppler`) | cluster-scoped | Backend for `ExternalSecret` resources |
 
 Sync order (Argo CD waves):
 
 1. Wave `0` — Operator Namespace / OperatorGroup / Subscription  
 2. Wave `1` — Operand Namespace  
-3. Wave `2` — ExternalSecretsConfig (waits for the CRD from the operator)
+3. Wave `2` — ExternalSecretsConfig (waits for the CRD from the operator)  
+4. Wave `3` — Doppler auth Secret  
+5. Wave `4` — ClusterSecretStore
 
 ---
 
@@ -132,12 +137,54 @@ oc get crd | grep external-secrets
 
 ---
 
+## Doppler ClusterSecretStore
+
+Included under `doppler/`:
+
+- `ClusterSecretStore` named `doppler`
+- Example `ExternalSecret` for key `MYSECRET`
+- `secret.yaml` is a **template only** (placeholder token) and is **not** applied by kustomize
+
+Create the auth Secret on the cluster (do **not** commit a real token):
+
+```bash
+oc create secret generic doppler-token-auth -n external-secrets \
+  --from-literal=dopplerToken='dp.st.YOUR_TOKEN_HERE' \
+  --dry-run=client -o yaml | oc apply -f -
+```
+
+Verify:
+
+```bash
+oc get secret doppler-token-auth -n external-secrets
+oc get clustersecretstore doppler
+oc get clustersecretstore doppler -o jsonpath='{.status.conditions}' | jq .
+```
+
+Reference it from an `ExternalSecret`:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: example
+  namespace: my-app
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: doppler
+  target:
+    name: example
+  dataFrom:
+    - find:
+        name:
+          regexp: .*
+```
+
 ## Next steps (after install)
 
-1. Create a `SecretStore` or `ClusterSecretStore` for your backend (Vault, AWS, Azure, etc.).
-2. Create `ExternalSecret` objects in app namespaces to sync secrets into Kubernetes `Secret`s.
-
-Those app-level resources are **not** part of this repo yet — add them per environment or application.
+Create `ExternalSecret` objects in app namespaces that reference `ClusterSecretStore/doppler`.
 
 ---
 
